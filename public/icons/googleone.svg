@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Google One">
+  <rect width="24" height="24" rx="12" fill="#121212"/>
+  <circle cx="9.2" cy="12" r="3.2" fill="#EA4335" opacity="0.95"/>
+  <circle cx="14.8" cy="12" r="3.2" fill="#4285F4" opacity="0.95"/>
+  <circle cx="12" cy="9.2" r="3.2" fill="#FBBC05" opacity="0.95"/>
+  <circle cx="12" cy="14.8" r="3.2" fill="#34A853" opacity="0.95"/>
+  <circle cx="12" cy="12" r="2.2" fill="#FFFFFF" opacity="0.92"/>
+</svg>
