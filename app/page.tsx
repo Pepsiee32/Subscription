@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Session, SupabaseClient, User } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabase } from '../lib/supabase';
 import { formatArs } from '../lib/schedule';
-import { Subscription, SubscriptionLifecycleStatus } from '../types/subscription';
+import { Subscription, SubscriptionAmountOverride, SubscriptionLifecycleStatus } from '../types/subscription';
 
 /** Cabecera del calendario: semana empieza en lunes (ISO). */
 const WEEK_DAYS = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
@@ -96,6 +96,28 @@ function isValidHexColor(value: string) {
 function normalizeLifecycleStatus(s: Pick<Subscription, 'status' | 'active'>): SubscriptionLifecycleStatus {
   if (s.status === 'active' || s.status === 'cancelled' || s.status === 'archived') return s.status;
   return s.active ? 'active' : 'cancelled';
+}
+
+function monthStartIso(year: number, month: number) {
+  return toDateOnlyString(new Date(year, month, 1));
+}
+
+function getEffectiveAmountForMonth(
+  subscription: Subscription,
+  overrides: SubscriptionAmountOverride[],
+  year: number,
+  month: number
+) {
+  const target = monthStartIso(year, month);
+  let effective = Number(subscription.amount_ars);
+  for (const override of overrides) {
+    if (override.effective_from <= target) {
+      effective = Number(override.amount_ars);
+    } else {
+      break;
+    }
+  }
+  return effective;
 }
 
 function frequencyLabel(f: Subscription['frequency']) {
@@ -241,6 +263,7 @@ function Dashboard({
   client: SupabaseClient;
 }) {
   const [items, setItems] = useState<Subscription[]>([]);
+  const [amountOverrides, setAmountOverrides] = useState<SubscriptionAmountOverride[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
@@ -259,24 +282,36 @@ function Dashboard({
   const [addStep, setAddStep] = useState<'pick' | 'details'>('pick');
   const [serviceSearch, setServiceSearch] = useState('');
   const [detailSubscriptionId, setDetailSubscriptionId] = useState<string | null>(null);
+  const [amountEditValue, setAmountEditValue] = useState('');
 
   async function loadData() {
-    const { data, error: fetchError } = await client
+    const { data: subscriptionsData, error: subscriptionsError } = await client
       .from('subscriptions')
       .select('*')
       .eq('user_id', userId)
       .order('start_date', { ascending: true });
+    const { data: overridesData, error: overridesError } = await client
+      .from('subscription_amount_overrides')
+      .select('*')
+      .eq('user_id', userId)
+      .order('effective_from', { ascending: true });
 
-    if (fetchError) setError(fetchError.message);
-    else {
-      const rows = (data as Subscription[]) ?? [];
+    if (subscriptionsError || overridesError) {
+      setError(mapDbError(subscriptionsError?.message ?? overridesError?.message ?? 'Error cargando datos'));
+    } else {
+      const rows = (subscriptionsData as Subscription[]) ?? [];
+      const overrideRows = (overridesData as SubscriptionAmountOverride[]) ?? [];
       setItems(rows.map((row) => ({ ...row, status: normalizeLifecycleStatus(row) })));
+      setAmountOverrides(overrideRows);
     }
   }
 
   function mapDbError(message: string) {
+    if (message.includes('subscription_amount_overrides')) {
+      return 'Falta migrar historial de montos. Ejecutá supabase/migrations/003_subscription_amount_overrides.sql en el SQL Editor y recargá.';
+    }
     if (message.includes('schema cache')) {
-      return 'Falta migrar la base de datos. En Supabase → SQL Editor ejecutá el archivo supabase/migrations/002_sync_all_subscription_columns.sql y recargá la app.';
+      return 'La API todavía no ve el esquema actualizado. Ejecutá 002 y 003 en el mismo proyecto de Supabase, luego corré: NOTIFY pgrst, \'reload schema\'; y recargá la app.';
     }
     if (message.includes('status') && (message.includes('column') || message.includes('does not exist'))) {
       return 'Falta la columna status (u otras). Ejecutá supabase/migrations/002_sync_all_subscription_columns.sql en el SQL Editor y recargá.';
@@ -385,6 +420,44 @@ function Dashboard({
     await loadData();
   }
 
+  async function updateAmountFromVisibleMonth() {
+    if (!detailSubscriptionId) return;
+    const parsedAmount = Number(amountEditValue.replace(',', '.'));
+    if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      setError('Ingresá un monto válido');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    const { error: upsertError } = await client.from('subscription_amount_overrides').upsert(
+      {
+        subscription_id: detailSubscriptionId,
+        user_id: userId,
+        amount_ars: parsedAmount,
+        effective_from: visibleMonthStart,
+      },
+      { onConflict: 'subscription_id,effective_from' }
+    );
+    if (upsertError) {
+      setError(mapDbError(upsertError.message));
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    await loadData();
+  }
+
+  const visibleMonthStart = monthStartIso(calendarYear, calendarMonth);
+  const overridesBySubscriptionId = useMemo(() => {
+    const map = new Map<string, SubscriptionAmountOverride[]>();
+    for (const override of amountOverrides) {
+      const current = map.get(override.subscription_id) ?? [];
+      current.push(override);
+      map.set(override.subscription_id, current);
+    }
+    return map;
+  }, [amountOverrides]);
+
   const monthlyCharges = useMemo(() => {
     const monthCharges: Array<{
       name: string;
@@ -408,9 +481,15 @@ function Dashboard({
       }
 
       const day = clampDay(calendarYear, calendarMonth, start.getDate());
+      const effectiveAmount = getEffectiveAmountForMonth(
+        subscription,
+        overridesBySubscriptionId.get(subscription.id) ?? [],
+        calendarYear,
+        calendarMonth
+      );
       monthCharges.push({
         name: subscription.name,
-        amountArs: Number(subscription.amount_ars),
+        amountArs: effectiveAmount,
         category: subscription.category,
         imageUrl: subscription.image_url,
         avatarColor: subscription.avatar_color,
@@ -421,7 +500,7 @@ function Dashboard({
     }
 
     return monthCharges;
-  }, [items, calendarMonth, calendarYear]);
+  }, [items, overridesBySubscriptionId, calendarMonth, calendarYear]);
 
   const monthTotal = useMemo(() => monthlyCharges.reduce((acc, charge) => acc + charge.amountArs, 0), [monthlyCharges]);
   const lifecycleStats = useMemo(() => {
@@ -440,6 +519,23 @@ function Dashboard({
     () => (detailSubscriptionId ? items.find((s) => s.id === detailSubscriptionId) : undefined),
     [items, detailSubscriptionId]
   );
+  const detailEffectiveAmount = useMemo(() => {
+    if (!detailSubscription) return 0;
+    const overrides = overridesBySubscriptionId.get(detailSubscription.id) ?? [];
+    return getEffectiveAmountForMonth(detailSubscription, overrides, calendarYear, calendarMonth);
+  }, [detailSubscription, overridesBySubscriptionId, calendarYear, calendarMonth]);
+  const detailOverrides = useMemo(
+    () => (detailSubscription ? overridesBySubscriptionId.get(detailSubscription.id) ?? [] : []),
+    [detailSubscription, overridesBySubscriptionId]
+  );
+  useEffect(() => {
+    if (!detailSubscription) {
+      setAmountEditValue('');
+      return;
+    }
+    const nextAmount = getEffectiveAmountForMonth(detailSubscription, detailOverrides, calendarYear, calendarMonth);
+    setAmountEditValue(String(nextAmount));
+  }, [detailSubscription, detailOverrides, calendarYear, calendarMonth]);
   const calendarCells = useMemo(() => {
     const leading = leadingBlankDaysMondayFirst(calendarYear, calendarMonth);
     const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
@@ -503,6 +599,7 @@ function Dashboard({
     setAddStep('pick');
     setServiceSearch('');
     setDetailSubscriptionId(null);
+    setAmountEditValue('');
     setError('');
   }
 
@@ -511,6 +608,7 @@ function Dashboard({
     setAddStep('pick');
     setServiceSearch('');
     setDetailSubscriptionId(null);
+    setAmountEditValue('');
     setError('');
   }
 
@@ -877,7 +975,7 @@ function Dashboard({
                         <h3 style={styles.subDetailName}>{detailSubscription.name}</h3>
                         <p style={styles.subDetailSubtitle}>
                           {frequencyLabel(detailSubscription.frequency)} ·{' '}
-                          {formatArs(Number(detailSubscription.amount_ars))}
+                          {formatArs(detailEffectiveAmount)}
                         </p>
                       </div>
 
@@ -913,10 +1011,12 @@ function Dashboard({
 
                       <div style={styles.subDetailInfoCard}>
                         <div style={styles.subDetailInfoRow}>
-                          <span style={styles.subDetailInfoKey}>Monto</span>
-                          <span style={styles.subDetailInfoVal}>
-                            {formatArs(Number(detailSubscription.amount_ars))}
-                          </span>
+                          <span style={styles.subDetailInfoKey}>Monto vigente ({MONTH_LABELS[calendarMonth]} {calendarYear})</span>
+                          <span style={styles.subDetailInfoVal}>{formatArs(detailEffectiveAmount)}</span>
+                        </div>
+                        <div style={styles.subDetailInfoRow}>
+                          <span style={styles.subDetailInfoKey}>Monto original</span>
+                          <span style={styles.subDetailInfoVal}>{formatArs(Number(detailSubscription.amount_ars))}</span>
                         </div>
                         <div style={styles.subDetailInfoRow}>
                           <span style={styles.subDetailInfoKey}>Categoría</span>
@@ -932,6 +1032,28 @@ function Dashboard({
                             <span style={styles.subDetailInfoVal}>{detailSubscription.cancel_from}</span>
                           </div>
                         ) : null}
+                      </div>
+
+                      <div style={styles.subDetailStatusCard}>
+                        <span style={styles.subDetailStatusLabel}>Editar monto desde mes visible</span>
+                        <div style={styles.amountEditRow}>
+                          <input
+                            style={styles.input}
+                            value={amountEditValue}
+                            onChange={(e) => setAmountEditValue(e.target.value)}
+                            placeholder="Nuevo monto ARS"
+                          />
+                          <button type="button" style={styles.primaryBtn} onClick={updateAmountFromVisibleMonth} disabled={busy}>
+                            {busy ? 'Guardando...' : `Aplicar desde ${MONTH_LABELS[calendarMonth]} ${calendarYear}`}
+                          </button>
+                        </div>
+                        {detailOverrides.length > 0 ? (
+                          <p style={styles.subDetailHistoryHint}>
+                            Historial: {detailOverrides.map((ov) => `${ov.effective_from}: ${formatArs(Number(ov.amount_ars))}`).join(' · ')}
+                          </p>
+                        ) : (
+                          <p style={styles.subDetailHistoryHint}>Sin cambios de monto guardados todavía.</p>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1812,6 +1934,10 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 10,
   },
+  amountEditRow: {
+    display: 'grid',
+    gap: 8,
+  },
   subDetailStatusDot: {
     width: 10,
     height: 10,
@@ -1858,6 +1984,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#ececec',
     textAlign: 'right',
     minWidth: 0,
+  },
+  subDetailHistoryHint: {
+    margin: '8px 0 0',
+    color: '#9a9a9a',
+    fontSize: 12,
+    lineHeight: 1.4,
   },
   addSheetHeader: {
     flexShrink: 0,

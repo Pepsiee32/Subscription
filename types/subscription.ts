@@ -20,6 +20,16 @@ export interface Subscription {
   created_at: string;
 }
 
+/** Override de monto que aplica desde `effective_from` (YYYY-MM-01) hacia adelante. */
+export interface SubscriptionAmountOverride {
+  id: string;
+  subscription_id: string;
+  user_id: string;
+  amount_ars: number;
+  effective_from: string;
+  created_at: string;
+}
+
 export interface UpcomingCharge {
   subscriptionId: string;
   name: string;

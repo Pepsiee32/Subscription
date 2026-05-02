@@ -15,6 +15,7 @@ App web con Next.js + Supabase para registrar suscripciones y ver cobros del ani
 2. Ejecuta `supabase/schema.sql`.
 
 Esto crea la tabla `subscriptions` y politicas RLS para que cada usuario solo vea sus datos.
+Si ya tenias una base creada, ejecuta tambien `supabase/migrations/003_subscription_amount_overrides.sql` para habilitar historial de montos.
 
 ## 3) Ejecutar en local
 
@@ -40,3 +41,4 @@ Abrir `http://localhost:3000`.
 - Alta de suscripcion con nombre, monto ARS, frecuencia y fecha de inicio.
 - Resumen por mes (anio actual).
 - Lista de proximos cobros.
+- Historial de montos por suscripcion (ej: mayo 22000, junio en adelante 24000).
