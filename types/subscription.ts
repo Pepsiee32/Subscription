@@ -1,5 +1,7 @@
 export type BillingFrequency = 'monthly' | 'yearly';
 export type SubscriptionCategory = 'Entretenimiento' | 'Productividad' | 'Lifestyle' | 'Utilidad' | 'Finanzas' | 'Salud' | 'Gaming' | 'Otros';
+/** Ciclo de vida en UI; se persiste en columnas `status`, `active` y `cancel_from`. */
+export type SubscriptionLifecycleStatus = 'active' | 'cancelled' | 'archived';
 
 export interface Subscription {
   id: string;
@@ -13,6 +15,8 @@ export interface Subscription {
   start_date: string;
   active: boolean;
   cancel_from: string | null;
+  /** Preferido; si falta (datos viejos), derivar de `active`. */
+  status?: SubscriptionLifecycleStatus;
   created_at: string;
 }
 

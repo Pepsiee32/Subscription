@@ -10,6 +10,7 @@ create table if not exists public.subscriptions (
   start_date date not null,
   active boolean not null default true,
   cancel_from date,
+  status text not null default 'active' check (status in ('active', 'cancelled', 'archived')),
   created_at timestamptz not null default now()
 );
 
