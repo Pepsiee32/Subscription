@@ -22,7 +22,6 @@ const POPULAR_SUBSCRIPTIONS = [
   { name: 'ChatGPT Plus', category: 'Productividad', imageUrl: '/icons/openai.svg', color: '#10A37F' },
   { name: 'Notion', category: 'Productividad', imageUrl: '/icons/notion.svg', color: '#6D6D6D' },
   { name: 'Google One', category: 'Utilidad', imageUrl: '/icons/googleone.svg', color: '#4285F4' },
-  { name: 'Microsoft 365', category: 'Productividad', imageUrl: '/icons/microsoft365.svg', color: '#D83B01' },
   { name: 'PlayStation Plus', category: 'Gaming', imageUrl: '/icons/playstation.svg', color: '#003791' },
   { name: 'Movistar', category: 'Utilidad', imageUrl: '/icons/movistar.svg', color: '#019DF4' },
   { name: 'Claro', category: 'Utilidad', imageUrl: '/icons/claro.svg', color: '#DA291C' },
@@ -39,8 +38,6 @@ const POPULAR_SUBSCRIPTIONS = [
   { name: 'Sport Club', category: 'Salud', imageUrl: '/icons/sportclub.svg', color: '#009639' },
   { name: 'Megatlon', category: 'Salud', imageUrl: '/icons/megatlon.svg', color: '#E31E24' },
   { name: 'OnFit', category: 'Salud', imageUrl: '/icons/onfit.svg', color: '#2563EB' },
-  { name: 'Club La Nación', category: 'Lifestyle', imageUrl: '/icons/clublanacion.svg', color: '#1E3A5F' },
-  { name: 'Clarín 365', category: 'Lifestyle', imageUrl: '/icons/clarin365.svg', color: '#E31B23' },
 ] as const;
 
 /** Primeros en la grilla; el resto va alfabético. */
@@ -715,10 +712,12 @@ function Dashboard({
                     <div style={styles.calendarCellBody}>
                       {dayCharges[0] ? (
                         <div style={styles.calendarAvatarCluster}>
-                          <div style={styles.calendarCellAvatar} aria-hidden>
-                            {dayCharges[0].imageUrl ? (
-                              <img src={dayCharges[0].imageUrl} alt="" style={styles.calendarCellAvatarImage} />
-                            ) : (
+                          {dayCharges[0].imageUrl?.trim() ? (
+                            <div style={styles.calendarCellLogoWrap} aria-hidden>
+                              <img src={dayCharges[0].imageUrl} alt="" style={styles.calendarCellLogoImg} />
+                            </div>
+                          ) : (
+                            <div style={styles.calendarCellAvatar} aria-hidden>
                               <span
                                 style={{
                                   ...styles.calendarAvatarFallback,
@@ -730,8 +729,8 @@ function Dashboard({
                               >
                                 {dayCharges[0].name.slice(0, 1).toUpperCase()}
                               </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                           {dayCharges.length > 1 ? (
                             <span
                               style={styles.calendarMoreBadgeBelow}
@@ -1475,6 +1474,22 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     maxWidth: '100%',
   },
+  /** Logo real en calendario: sin disco de color de fondo. */
+  calendarCellLogoWrap: {
+    width: 36,
+    height: 36,
+    display: 'grid',
+    placeItems: 'center',
+    background: 'transparent',
+    flexShrink: 0,
+  },
+  calendarCellLogoImg: {
+    width: 36,
+    height: 36,
+    objectFit: 'contain',
+    display: 'block',
+  },
+  /** Sin imagen: círculo con color elegido + inicial (como al crear el servicio). */
   calendarCellAvatar: {
     width: 32,
     height: 32,
@@ -1488,12 +1503,6 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     border: '1px solid #3a3a3a',
     flexShrink: 0,
-  },
-  calendarCellAvatarImage: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain',
-    padding: 3,
   },
   calendarMoreBadgeBelow: {
     flexShrink: 0,
